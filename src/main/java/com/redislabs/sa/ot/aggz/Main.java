@@ -203,7 +203,19 @@ class ConnectionHelper{
 
     public ConnectionHelper(URI uri){
         HostAndPort address = new HostAndPort(uri.getHost(), uri.getPort());
-        JedisClientConfig clientConfig = DefaultJedisClientConfig.builder().connectionTimeoutMillis(30000).build(); // timeout and client settings
+        JedisClientConfig clientConfig = null;
+        System.out.println("$$$ "+uri.getAuthority().split(":").length);
+        if(uri.getAuthority().split(":").length==3){
+            String user = uri.getAuthority().split(":")[0];
+            String password = uri.getAuthority().split(":")[1];
+            System.out.println("\n\nUsing user: "+user+" / password @@@@@@@@@@");
+            clientConfig = DefaultJedisClientConfig.builder().user(user).password(password)
+                    .connectionTimeoutMillis(30000).build(); // timeout and client settings
+
+        }else {
+            clientConfig = DefaultJedisClientConfig.builder()
+                    .connectionTimeoutMillis(30000).build(); // timeout and client settings
+        }
         GenericObjectPoolConfig<Connection> poolConfig = new ConnectionPoolConfig();
         poolConfig.setMaxIdle(10);
         poolConfig.setMaxTotal(10);

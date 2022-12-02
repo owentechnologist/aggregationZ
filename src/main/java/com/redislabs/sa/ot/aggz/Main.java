@@ -53,8 +53,8 @@ public class Main {
                 int portIndex = argList.indexOf("--port");
                 port = Integer.parseInt(argList.get(portIndex + 1));
             }
-            if (argList.contains("--username")) {
-                int userNameIndex = argList.indexOf("--username");
+            if (argList.contains("--user")) {
+                int userNameIndex = argList.indexOf("--user");
                 username = argList.get(userNameIndex + 1);
             }
             if (argList.contains("--password")) {
@@ -210,7 +210,7 @@ class ConnectionHelper{
             String password = uri.getAuthority().split(":")[1];
             System.out.println("\n\nUsing user: "+user+" / password @@@@@@@@@@");
             clientConfig = DefaultJedisClientConfig.builder().user(user).password(password)
-                    .connectionTimeoutMillis(30000).build(); // timeout and client settings
+                    .connectionTimeoutMillis(30000).timeoutMillis(120000).build(); // timeout and client settings
 
         }else {
             clientConfig = DefaultJedisClientConfig.builder()
@@ -227,4 +227,3 @@ class ConnectionHelper{
         this.jedisPooled = new JedisPooled(connectionProvider);
     }
 }
-

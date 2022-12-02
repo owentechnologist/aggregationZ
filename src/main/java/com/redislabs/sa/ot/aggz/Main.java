@@ -214,7 +214,7 @@ class ConnectionHelper{
 
         }else {
             clientConfig = DefaultJedisClientConfig.builder()
-                    .connectionTimeoutMillis(30000).build(); // timeout and client settings
+                    .connectionTimeoutMillis(30000).timeoutMillis(120000).build(); // timeout and client settings
         }
         GenericObjectPoolConfig<Connection> poolConfig = new ConnectionPoolConfig();
         poolConfig.setMaxIdle(10);

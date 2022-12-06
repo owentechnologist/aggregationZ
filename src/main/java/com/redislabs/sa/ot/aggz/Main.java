@@ -208,7 +208,8 @@ class ConnectionHelper{
         if(uri.getAuthority().split(":").length==3){
             String user = uri.getAuthority().split(":")[0];
             String password = uri.getAuthority().split(":")[1];
-            System.out.println("\n\nUsing user: "+user+" / password @@@@@@@@@@");
+            password = password.split("@")[0];
+            System.out.println("\n\nUsing user: "+user+" / password @@@@@@@@@@"+password);
             clientConfig = DefaultJedisClientConfig.builder().user(user).password(password)
                     .connectionTimeoutMillis(30000).timeoutMillis(120000).build(); // timeout and client settings
 

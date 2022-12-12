@@ -179,7 +179,7 @@ public class Main {
                 " innerLoop=(innerLoop+1) end end return resultString";
         JedisPooled jedis = connectionHelper.getPooledJedis();
         double timestamp = System.currentTimeMillis();
-        Object luaResponse = jedis.eval(luaScript,1,keyNameRoutingValue,keyNameRoutingValue,""+timestamp,"600");
+        Object luaResponse = jedis.eval(luaScript,1,keyNameRoutingValue,keyNameRoutingValue,""+timestamp,""+lookBackSeconds);
         System.out.println("\nResults from Lua: [keyName] [totalCount] [countForTimeWindow]  \n"+luaResponse);
         System.out.println("\n\nrunning the lua script with SMEMBERS logic took "+(System.currentTimeMillis()-timestamp+" milliseconds"));
 

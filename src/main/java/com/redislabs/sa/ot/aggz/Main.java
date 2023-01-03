@@ -87,19 +87,8 @@ public class Main {
             }
 
         }
-        HostAndPort hnp = new HostAndPort(host,port);
-        System.out.println("Connecting to "+hnp.toString());
-        URI uri = null;
-        try {
-            if(!("".equalsIgnoreCase(password))){
-                uri = new URI("redis://" + username + ":" + password + "@" + hnp.getHost() + ":" + hnp.getPort());
-            }else{
-                uri = new URI("redis://" + hnp.getHost() + ":" + hnp.getPort());
-            }
-        }catch(URISyntaxException use){use.printStackTrace();System.exit(1);}
-        jedisURI = uri;
-        connectionHelper = new ConnectionHelper(jedisURI);
-        testJedisConnection(uri);
+        connectionHelper = new ConnectionHelper(ConnectionHelper.buildURI(host,port,"default",""));
+        testJedisConnection(host,port);
         if(!isReadOnly) {
             buildSetOfTargetKeys(membersKey,keyQuantity);
             writeZ(membersKey,entriesToAddToKeys);
@@ -141,8 +130,8 @@ public class Main {
         return keySet;
     }
 
-    private static void testJedisConnection(URI uri) {
-        System.out.println("\ntesting jedis connection using URI == "+uri.getHost()+":"+uri.getPort());
+    private static void testJedisConnection(String host,int port) {
+        System.out.println("\ntesting jedis connection using URI == "+host+":"+port);
         JedisPooled jedis = connectionHelper.getPooledJedis();
         System.out.println("Testing connection by executing 'DBSIZE' response is: "+ jedis.dbSize());
     }
@@ -193,13 +182,54 @@ class ConnectionHelper{
     final PooledConnectionProvider connectionProvider;
     final JedisPooled jedisPooled;
 
+    /**
+     * Used when you want to send a batch of commands to the Redis Server
+     * @return Pipeline
+     */
     public Pipeline getPipeline(){
-        return new Pipeline(connectionProvider.getConnection());
+        return  new Pipeline(jedisPooled.getPool().getResource());
     }
 
+    /**
+     * Assuming use of Jedis 4.3.1:
+     * https://github.com/redis/jedis/blob/82f286b4d1441cf15e32cc629c66b5c9caa0f286/src/main/java/redis/clients/jedis/Transaction.java#L22-L23
+     * @return Transaction
+     */
+    public Transaction getTransaction(){
+        return new Transaction(jedisPooled.getPool().getResource());
+    }
+
+    /**
+     * Obtain the default object used to perform Redis commands
+     * @return JedisPooled
+     */
     public JedisPooled getPooledJedis(){
         return jedisPooled;
     }
+
+    /**
+     * Use this to build the URI expected in this classes' Constructor
+     * @param host
+     * @param port
+     * @param username
+     * @param password
+     * @return
+     */
+    public static URI buildURI(String host,int port,String username,String password){
+        URI uri = null;
+        try {
+            if (!("".equalsIgnoreCase(password))) {
+                uri = new URI("redis://" + username + ":" + password + "@" + host + ":" + port);
+            } else {
+                uri = new URI("redis://" + host + ":" + port);
+            }
+        } catch (URISyntaxException use) {
+            use.printStackTrace();
+            System.exit(1);
+        }
+        return uri;
+    }
+
 
     public ConnectionHelper(URI uri){
         HostAndPort address = new HostAndPort(uri.getHost(), uri.getPort());
@@ -219,7 +249,7 @@ class ConnectionHelper{
         }
         GenericObjectPoolConfig<Connection> poolConfig = new ConnectionPoolConfig();
         poolConfig.setMaxIdle(10);
-        poolConfig.setMaxTotal(10);
+        poolConfig.setMaxTotal(1000);
         poolConfig.setMinIdle(1);
         poolConfig.setMaxWait(Duration.ofMinutes(1));
         poolConfig.setTestOnCreate(true);

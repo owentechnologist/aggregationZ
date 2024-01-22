@@ -87,7 +87,7 @@ public class Main {
             }
 
         }
-        connectionHelper = new ConnectionHelper(ConnectionHelper.buildURI(host,port,"default",""));
+        connectionHelper = new ConnectionHelper(ConnectionHelper.buildURI(host,port,username,password));
         testJedisConnection(host,port);
         if(!isReadOnly) {
             buildSetOfTargetKeys(membersKey,keyQuantity);

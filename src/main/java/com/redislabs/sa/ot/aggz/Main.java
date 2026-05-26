@@ -37,9 +37,13 @@ public class Main {
     static int lookBackSeconds = 3;
     static ConnectionHelper connectionHelper = null;
     static String membersKey = "{whoIsHungry?}";
-    static int keyQuantity = 25;
+    static String sampleMembersKey = "{whoIsHungry?}:sampleSet";
+    static int targetKeyQuantity = 25;
+    static int keyQuantity = 0;//will set this based on the number of members in the set if not provided as an argument
     static int entriesToAddToKeys = 25;
     static boolean resetMembers = false;
+    static int keysInSample = 0;
+    static boolean useTLS = false;
 
     //
     public static void main(String [] args){
@@ -77,26 +81,44 @@ public class Main {
                 int index = argList.indexOf("--memberskey");
                 membersKey = argList.get(index + 1);
             }
-            if (argList.contains("--keyquantity")) {
-                int index = argList.indexOf("--keyquantity");
-                keyQuantity = Integer.parseInt(argList.get(index + 1));
+            if (argList.contains("--targetkeyquantity")) {
+                int index = argList.indexOf("--targetkeyquantity");
+                targetKeyQuantity = Integer.parseInt(argList.get(index + 1));
             }
             if (argList.contains("--entrycount")) {
                 int index = argList.indexOf("--entrycount");
                 entriesToAddToKeys = Integer.parseInt(argList.get(index + 1));
             }
-
+            if (argList.contains("--samplesize")) { // example 100
+                int index = argList.indexOf("--samplesize");
+                keysInSample = Integer.parseInt(argList.get(index + 1));
+            }
+            if (argList.contains("--usetls")) {
+                int index = argList.indexOf("--usetls");
+                useTLS = Boolean.parseBoolean(argList.get(index + 1));
+            }
         }
-        connectionHelper = new ConnectionHelper(ConnectionHelper.buildURI(host,port,username,password));
+        connectionHelper = new ConnectionHelper(ConnectionHelper.buildURI(host,port,username,password,useTLS));
         testJedisConnection(host,port);
+        keyQuantity = Integer.parseInt((""+connectionHelper.getPooledJedis().scard(membersKey)));
         if(!isReadOnly) {
-            buildSetOfTargetKeys(membersKey,keyQuantity);
+            System.out.println("\nAdding "+entriesToAddToKeys+" entries to each of the "+keyQuantity+" keys that are members of the set "+membersKey);
+            if(connectionHelper.getPooledJedis().scard(membersKey)<targetKeyQuantity) {
+                System.out.println("The set "+membersKey+" has only "+connectionHelper.getPooledJedis().scard(membersKey)+" members, but you wanted to add entries to "+targetKeyQuantity+" members - so we will add the missing members");
+                buildSetOfTargetKeys(membersKey,targetKeyQuantity);
+            }
             writeZ(membersKey,entriesToAddToKeys);
         }
-        showCaseCountingZ(membersKey,lookBackSeconds);
+        if(keysInSample>0){
+            System.out.println("\nQuerying a sample of "+keysInSample+" keys out of the total "+connectionHelper.getPooledJedis().scard(membersKey)+" members in the set "+membersKey);
+            buildSetOfTargetKeys(sampleMembersKey,keysInSample);
+            showCaseCountingZ(sampleMembersKey,lookBackSeconds);            
+        }else{
+            showCaseCountingZ(membersKey,lookBackSeconds);
+        }
     }
 
-    static void buildSetOfTargetKeys(String setName,int howmany){
+    static void clearSetOfTargetKeys(String setName){
         Pipeline jedisPipe = connectionHelper.getPipeline();
         if(resetMembers){
             String luaCleanup = "local cursor = 0 local keyNum = 0 repeat " +
@@ -110,13 +132,22 @@ public class Main {
             jedisPipe.eval(luaCleanup,1,membersKey);
             jedisPipe.del(setName);
         }
+        jedisPipe.del(setName);
+        jedisPipe.sync();
+    }
+
+    static void buildSetOfTargetKeys(String setName,int howmany){
+        System.out.println("\nStoring a set of "+howmany+" members in the keyname "+setName);
+        Pipeline jedisPipe = connectionHelper.getPipeline();
+        jedisPipe.del(setName);
         for(int x=0;x<howmany;x++){
-            jedisPipe.sadd(setName,setName+"email"+x+"@email.com");
+            jedisPipe.sadd(setName,membersKey+"email"+x+"@email.com");
         }
         jedisPipe.sync();
     }
 
-    //returns the set of keynames suitable for our use (would be a set targeting a specific grouping)
+    //returns the set of keynames suitable for our use 
+    //would be a set targeting a specific grouping such as {whoIsHungry?} or a sample of that set such as {whoIsHungry?}:sampleSet
     static Set<String> getSetOfTargetKeys(String setName) {
         Pipeline jedisPipe = connectionHelper.getPipeline();
         jedisPipe.smembers(setName);
@@ -138,10 +169,10 @@ public class Main {
 
 
     //For each member, we can write a SortedSet that tracks email-address-related ping events with timestamps
-    //passed in is the routingValue which doubles as the keyname for the SetOfKeys
-    static void writeZ(String keynameRoutingValue,int numberEntries) {
+    //passed in is the setOfKeys that contains the keynames to which we want to add entries and the number of entries to add to each key
+    static void writeZ(String setOfKeys,int numberEntries) {
         Pipeline jedisPipe = connectionHelper.getPipeline();
-        Set<String> rSet = getSetOfTargetKeys(keynameRoutingValue);
+        Set<String> rSet = getSetOfTargetKeys(setOfKeys);
         long delta = 0;
         for (String targetKeyName : rSet) {
             for (int x = 0; x < numberEntries; x++) {
@@ -154,7 +185,7 @@ public class Main {
     }
 
         //
-    static void showCaseCountingZ(String keyNameRoutingValue,long secondsBackInTime) {
+    static void showCaseCountingZ(String setOfKeys,long secondsBackInTime) {
         //SortedSet API offers ZCARD and ZCOUNT:
         String luaScript = "local resultString = '' local ruleSetKey = ARGV[1] " +
                 "local txTime = ARGV[2] local lookBackSeconds = ARGV[3] " +
@@ -163,17 +194,35 @@ public class Main {
                 "local innerLoop = 1 " +
                 "while #{keyNames[innerLoop]} > 0 " +
                 "do resultString = resultString..' '" +
-                "..keyNames[innerLoop]..' '..(redis.call('ZCARD',keyNames[innerLoop]))..' '" +
+                "..'\\n'..keyNames[innerLoop]..' '..(redis.call('ZCARD',keyNames[innerLoop]))..' '" +
                 "..(redis.call('ZCOUNT',keyNames[innerLoop],(txTime-(lookBackSeconds*1000)),txTime))" +
                 " innerLoop=(innerLoop+1) end end return resultString";
         JedisPooled jedis = connectionHelper.getPooledJedis();
         double timestamp = System.currentTimeMillis();
-        Object luaResponse = jedis.eval(luaScript,1,keyNameRoutingValue,keyNameRoutingValue,""+timestamp,""+lookBackSeconds);
-        System.out.println("\nResults from Lua: [keyName] [totalCount] [countForTimeWindow]  \n"+luaResponse);
-        System.out.println("\n\nrunning the lua script with SMEMBERS logic took "+(System.currentTimeMillis()-timestamp+" milliseconds"));
+        Object lrObject = jedis.eval(luaScript,1,setOfKeys,setOfKeys,""+timestamp,""+lookBackSeconds);
+        String luaResponse = (String) lrObject;
+        System.out.println("\n\nCalling the lua script (round-trip) with SMEMBERS/SCARD/ZCOUNT logic took "+(System.currentTimeMillis()-timestamp+" milliseconds"));
+        // 1. Print the table header with defined column widths
+        // %-25s means: String, left-justified, 25 characters wide
+        System.out.printf("\n%-35s %-24s %-24s%n", "Key Name", "|| Total Count [zcard]", "|| Window Count [zcount]");
+        System.out.println("--------------------------------------------------------------------------------------");
 
-        System.out.println("The script gathered the data from "+jedis.scard(keyNameRoutingValue)+" keys");
+        // 2. Split the response into rows and print each row formatted
+        String[] rows = luaResponse.split("\n");
+        for (String row : rows) {
+            if (!row.trim().isEmpty()) {
+                // Split by whitespace to extract individual fields
+                String[] fields = row.split("\\s+"); 
+                
+                if (fields.length >= 3) {
+                    System.out.printf("%-44s %-24s %-24s%n", fields[0], fields[1], fields[2]);
+                }
+            }
+        }
+        System.out.println("The script gathered the data from "+jedis.scard(setOfKeys)+" keys");
         System.out.println("The time window addressed was "+lookBackSeconds+" seconds");
+        String exampleZSetKey = jedis.srandmember(setOfKeys);
+        System.out.println("An example of one of the keys stored is "+exampleZSetKey+" which holds the following data: "+jedis.zrangeWithScores(exampleZSetKey,0,-1));
     }
 }
 
@@ -213,15 +262,18 @@ class ConnectionHelper{
      * @param port
      * @param username
      * @param password
+     * @param useTls - if true, the URI will be built with the rediss:// scheme which will trigger TLS/SSL in the JedisClientConfig 
      * @return
      */
-    public static URI buildURI(String host,int port,String username,String password){
+    public static URI buildURI(String host, int port, String username, String password, boolean useTls) {
         URI uri = null;
+        // Use rediss:// for TLS, redis:// for standard
+        String scheme = useTls ? "rediss://" : "redis://"; 
         try {
-            if (!("".equalsIgnoreCase(password))) {
-                uri = new URI("redis://" + username + ":" + password + "@" + host + ":" + port);
+            if (password != null && !password.trim().isEmpty()) {
+                uri = new URI(scheme + username + ":" + password + "@" + host + ":" + port);
             } else {
-                uri = new URI("redis://" + host + ":" + port);
+                uri = new URI(scheme + host + ":" + port);
             }
         } catch (URISyntaxException use) {
             use.printStackTrace();
@@ -230,23 +282,28 @@ class ConnectionHelper{
         return uri;
     }
 
-
     public ConnectionHelper(URI uri){
         HostAndPort address = new HostAndPort(uri.getHost(), uri.getPort());
-        JedisClientConfig clientConfig = null;
+        
+        // Check if the URI scheme dictates a TLS connection
+        boolean isSsl = "rediss".equalsIgnoreCase(uri.getScheme());
+
+        DefaultJedisClientConfig.Builder configBuilder = DefaultJedisClientConfig.builder()
+                .connectionTimeoutMillis(30000)
+                .timeoutMillis(120000)
+                .ssl(isSsl); // <--- CRITICAL: Enables TLS/SSL
+
         System.out.println("$$$ "+uri.getAuthority().split(":").length);
         if(uri.getAuthority().split(":").length==3){
             String user = uri.getAuthority().split(":")[0];
-            String password = uri.getAuthority().split(":")[1];
-            password = password.split("@")[0];
+            String password = uri.getAuthority().split(":")[1].split("@")[0];
+            
             System.out.println("\n\nUsing user: "+user+" / password @@@@@@@@@@"+password);
-            clientConfig = DefaultJedisClientConfig.builder().user(user).password(password)
-                    .connectionTimeoutMillis(30000).timeoutMillis(120000).build(); // timeout and client settings
-
-        }else {
-            clientConfig = DefaultJedisClientConfig.builder()
-                    .connectionTimeoutMillis(30000).timeoutMillis(120000).build(); // timeout and client settings
+            configBuilder.user(user).password(password);
         }
+
+        JedisClientConfig clientConfig = configBuilder.build();
+
         GenericObjectPoolConfig<Connection> poolConfig = new ConnectionPoolConfig();
         poolConfig.setMaxIdle(10);
         poolConfig.setMaxTotal(1000);

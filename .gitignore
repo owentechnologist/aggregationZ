@@ -1,4 +1,4 @@
 # Project exclude paths
 /target/
 owennotes.txt
-.DS_Store/*
+/.DS_Store/
